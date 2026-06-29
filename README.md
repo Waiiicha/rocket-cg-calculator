@@ -1,37 +1,38 @@
-# Rocket CG Calculator
+# 液体火箭质量、质心和转动惯量计算工具
 
-Liquid rocket mass, center of gravity, and moment of inertia calculator based on **QJ 1080A-1997 液体火箭质量、质心和转动惯量计算方法**.
+本项目是一个基于 **QJ 1080A-1997《液体火箭质量、质心和转动惯量计算方法》** 的液体火箭质量特性计算工具。
 
-The project uses Excel only for engineering inputs and result delivery. The calculation logic is implemented in Python for better transparency, testing, and maintainability.
+项目采用“Excel 输入/输出 + Python 计算内核”的技术路线：Excel 只负责工程参数录入和结果交付，复杂计算全部在 Python 中实现，便于检查、测试、维护和版本管理。
 
-## Features
+## 功能
 
-- Read structured rocket mass-property inputs from `input_template.xlsx`.
-- Calculate component mass-property combinations using the parallel-axis theorem.
-- Model invariant mass changes at stage/booster separation times.
-- Calculate jettisoned mass time histories.
-- Implement QJ 1080A tank geometry radius models for propellant/ullage calculations.
-- Numerically integrate propellant volume, center of gravity, and inertia versus liquid level.
-- Calculate variable tank mass properties over flight time.
-- Output Excel result tables and a PDF plot report.
-- Include pytest coverage for core calculations.
+- 从 `input_template.xlsx` 读取结构化输入参数。
+- 使用平行轴定理合成部组件质量、质心和转动惯量。
+- 按级间/助推器分离时间计算不变质量突变。
+- 计算可抛质量随时间的分段变化。
+- 实现 QJ 1080A 中贮箱第一类/第二类半径模型。
+- 对推进剂体积、质心和转动惯量随液位变化进行数值积分。
+- 计算增压气体质量特性。
+- 计算贮箱可变质量随飞行时间变化。
+- 输出 Excel 结果表和 PDF 曲线图。
+- 使用 `pytest` 对核心计算函数进行测试。
 
-## Repository Contents
+## 文件结构
 
 ```text
-rocket_mass_properties.py   Core calculation library
-run_calculation.py          Command-line entry point
-create_input_template.py    Regenerate the Excel input template
-input_template.xlsx         Editable input workbook template
+rocket_mass_properties.py   核心计算库
+run_calculation.py          命令行运行入口
+create_input_template.py    生成/刷新 Excel 输入模板
+input_template.xlsx         可编辑的输入模板
 ```
 
-Generated outputs are written under `output/` and are intentionally ignored by Git.
+计算结果会生成到 `output/` 目录，该目录已加入 `.gitignore`，不会提交到仓库。
 
-## Requirements
+## 环境要求
 
-Python 3.10+ is recommended.
+推荐使用 Python 3.10 或更新版本。
 
-Required packages:
+依赖包：
 
 ```text
 numpy
@@ -41,64 +42,64 @@ matplotlib
 pytest
 ```
 
-Install dependencies with:
+安装依赖：
 
 ```powershell
 pip install numpy pandas openpyxl matplotlib pytest
 ```
 
-## Usage
+## 使用方法
 
-Create or refresh the input template:
+生成或刷新输入模板：
 
 ```powershell
 python create_input_template.py
 ```
 
-Edit `input_template.xlsx`, then run the calculation:
+编辑 `input_template.xlsx` 后运行计算：
 
 ```powershell
 python run_calculation.py
 ```
 
-Default outputs:
+默认输出文件：
 
 ```text
 output/mass_properties_result.xlsx
 output/mass_properties_plots.pdf
 ```
 
-Specify custom paths:
+指定输入和输出路径：
 
 ```powershell
 python run_calculation.py --input input_template.xlsx --output output/mass_properties_result.xlsx --plots output/mass_properties_plots.pdf
 ```
 
-Skip PDF generation:
+跳过 PDF 绘图：
 
 ```powershell
 python run_calculation.py --no-plots
 ```
 
-## Input Workbook Sheets
+## 输入表格说明
 
-`input_template.xlsx` contains these sheets:
+`input_template.xlsx` 包含以下工作表：
 
-- `总体参数`: stage count, booster count, time range, time step, liquid-level integration points.
-- `级事件`: ignition, cutoff, and separation times for stages and boosters.
-- `不变质量`: dry/invariant component mass, CG, and inertia data.
-- `可抛质量`: fairings or other jettisoned components.
-- `贮箱基本参数`: tank density, flow rate, fill mass, residual mass, coordinate offsets, and reference full-tank values.
-- `贮箱几何_第一类`: QJ 1080A type-1 tank radius parameters.
-- `贮箱几何_第二类`: QJ 1080A type-2 internal deduction radius parameters.
-- `外行导管`: off-axis pipe contributions to `Jx`.
-- `运输状态`: reserved transport-state inputs.
+- `总体参数`：火箭总级数、助推器数量、飞行时间范围、时间步长、液位积分点数。
+- `级事件`：各子级/助推器的点火时间、关机时间和分离时间。
+- `不变质量`：结构、设备、有效载荷等不变质量部组件的质量、质心和中心主惯量。
+- `可抛质量`：整流罩等可抛部件的质量、质心、惯量和抛离时间。
+- `贮箱基本参数`：贮箱密度、秒流量、加注量、剩余量、坐标原点偏移和满箱参考量。
+- `贮箱几何_第一类`：QJ 1080A 第一类贮箱半径模型参数。
+- `贮箱几何_第二类`：QJ 1080A 第二类内部扣除体积半径模型参数。
+- `外行导管`：外行导管对滚转惯量 `Jx` 的贡献。
+- `运输状态`：运输状态输入预留表。
 
-Angles such as `beta11_deg` are entered in degrees. Python converts them to radians internally.
+角度字段，例如 `beta11_deg`、`beta12_deg`，统一使用“度”为单位。程序内部会自动转换为弧度。
 
-## Output Workbook Sheets
+## 输出表格说明
 
-`mass_properties_result.xlsx` includes:
+`mass_properties_result.xlsx` 包含以下工作表：
 
 - `输入检查`
 - `不变质量结果`
@@ -108,34 +109,43 @@ Angles such as `beta11_deg` are entered in degrees. Python converts them to radi
 - `可抛质量时间序列`
 - `全箭时间序列`
 
-## Separation Rule
+PDF 输出 `mass_properties_plots.pdf` 包含：
 
-Invariant mass follows this stage/booster separation rule:
+- 全箭质量随时间变化曲线。
+- 全箭质心 `X/Y/Z` 随时间变化曲线。
+- 全箭转动惯量 `Jx/Jy/Jz` 随时间变化曲线。
+- 不变质量随时间变化曲线。
+- 可变质量汇总随时间变化曲线。
+- 可抛质量随时间变化曲线。
+
+## 级间分离规则
+
+不变质量按以下规则随级间/助推器分离发生突变：
 
 ```text
-t < ts   -> retained
-t >= ts  -> removed
+t < ts   -> 保留该级/助推器不变质量
+t >= ts  -> 剔除该级/助推器不变质量
 ```
 
-This matches the implemented boundary convention for stage separation events.
+其中 `ts` 为 `级事件` 表中的分离时间。
 
-## Tests
+## 测试
 
-Run tests with:
+运行单元测试：
 
 ```powershell
 python -m pytest tests
 ```
 
-Current tests cover:
+当前测试覆盖：
 
-- Parallel-axis mass-property combination.
-- Cylindrical tank numerical volume/CG integration.
-- Invariant mass removal at separation time.
+- 平行轴定理质量特性合成。
+- 圆柱贮箱体积和质心数值积分。
+- 分离时刻不变质量剔除规则。
 
-## Current Scope and Notes
+## 当前实现范围和注意事项
 
-- Core QJ 1080A tank radius, propellant, gas, variable mass, jettison, and total rocket time-series workflows are implemented.
-- `运输状态` input is currently reserved and not yet connected to the output workflow.
-- The tank geometry equations are implemented from QJ 1080A formulas and the provided figure references. Real vehicle use should validate full-tank volume, CG, and inertia against known CAD or analysis data.
-- Generated Excel/PDF outputs are not committed; regenerate them locally when needed.
+- 已实现 QJ 1080A 贮箱半径、推进剂积分、增压气体、可变质量、可抛质量和全箭时间序列主流程。
+- `运输状态` 表目前作为输入预留，尚未接入结果输出流程。
+- 贮箱几何方程根据 QJ 1080A 公式和图 3/图 4 符号实现。用于真实型号前，建议用 CAD 或已有分析结果校核满箱体积、满箱质心和满箱转动惯量。
+- 生成的 Excel/PDF 结果不提交到 Git；需要时可本地重新运行生成。
