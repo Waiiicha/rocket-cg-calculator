@@ -31,6 +31,15 @@ def test_cylindrical_tank_volume_matches_pi_r2h():
     assert np.isclose(full["X_phi"], 5, rtol=1e-4)
 
 
+def test_equivalent_cylinder_without_qj_type1_geometry():
+    tank = {"贮箱ID": "T-2", "几何类型": "等效圆柱", "等效半径R": 2.0, "等效高度H": 7.0, "推进剂密度rho_phi": 3.0}
+    res = propellant_by_level(tank, {}, {}, pd.DataFrame(), 201)
+    full = res.iloc[-1]
+    assert np.isclose(full["V_phi"], math.pi * 2.0**2 * 7.0, rtol=1e-4)
+    assert np.isclose(full["M_phi"], math.pi * 2.0**2 * 7.0 * 3.0, rtol=1e-4)
+    assert np.isclose(full["X_phi"], 3.5, rtol=1e-4)
+
+
 def test_invariant_mass_drops_at_separation_time():
     inv = pd.DataFrame([
         {"类型": "子级", "编号": 1, "M": 100, "X": 0, "Y": 0, "Z": 0, "Jx": 0, "Jy": 0, "Jz": 0},

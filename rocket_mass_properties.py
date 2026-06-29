@@ -132,7 +132,12 @@ def tank_radius_type2(x: np.ndarray, p: dict[str, Any]) -> np.ndarray:
     return np.maximum(r, 0)
 
 
-def tank_area(x: np.ndarray, p1: dict[str, Any], p2: dict[str, Any]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def tank_area(x: np.ndarray, p1: dict[str, Any], p2: dict[str, Any], tank: dict[str, Any] | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if tank and _text(tank.get("几何类型")) == "等效圆柱":
+        r = max(_num(tank.get("等效半径R")), 0.0)
+        r1 = np.full_like(np.asarray(x, dtype=float), r)
+        r2 = np.zeros_like(r1)
+        return np.pi * r1**2, r1, r2
     r1 = tank_radius_type1(x, p1)
     r2 = tank_radius_type2(x, p2)
     area = np.pi * np.maximum(r1**2 - r2**2, 0)
@@ -144,7 +149,10 @@ def _trapz(y: np.ndarray, x: np.ndarray) -> float:
 
 
 def propellant_by_level(tank: dict[str, Any], p1: dict[str, Any], p2: dict[str, Any], ducts: pd.DataFrame, n: int) -> pd.DataFrame:
-    height = max(_num(p1.get("H19")), _num(p2.get("H29")))
+    if _text(tank.get("几何类型")) == "等效圆柱":
+        height = _num(tank.get("等效高度H"))
+    else:
+        height = max(_num(p1.get("H19")), _num(p2.get("H29")))
     if height <= EPS:
         height = _num(tank.get("总高H"), 1.0)
     rho = _num(tank.get("推进剂密度rho_phi"))
@@ -158,7 +166,7 @@ def propellant_by_level(tank: dict[str, Any], p1: dict[str, Any], p2: dict[str, 
 
     for h in h_values:
         x = np.linspace(0, h, max(2, int(n))) if h > EPS else np.array([0.0, 0.0])
-        area, r1, r2 = tank_area(x, p1, p2)
+        area, r1, r2 = tank_area(x, p1, p2, tank)
         v = _trapz(area, x)
         m = rho * v
         xcg = _trapz(x * area, x) / v if v > EPS else 0.0

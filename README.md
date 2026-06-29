@@ -23,7 +23,9 @@
 rocket_mass_properties.py   核心计算库
 run_calculation.py          命令行运行入口
 create_input_template.py    生成/刷新 Excel 输入模板
+create_starship_example.py  生成 Starship/Super Heavy 公开数据近似样例
 input_template.xlsx         可编辑的输入模板
+input_starship_example.xlsx Starship/Super Heavy 近似输入样例
 ```
 
 计算结果会生成到 `output/` 目录，该目录已加入 `.gitignore`，不会提交到仓库。
@@ -62,6 +64,18 @@ python create_input_template.py
 python run_calculation.py
 ```
 
+生成 Starship/Super Heavy 公开数据近似样例：
+
+```powershell
+python create_starship_example.py
+```
+
+运行 Starship/Super Heavy 近似样例：
+
+```powershell
+python run_calculation.py --input input_starship_example.xlsx --output output/starship_mass_properties_result.xlsx --plots output/starship_mass_properties_plots.pdf
+```
+
 默认输出文件：
 
 ```text
@@ -96,6 +110,13 @@ python run_calculation.py --no-plots
 - `运输状态`：运输状态输入预留表。
 
 角度字段，例如 `beta11_deg`、`beta12_deg`，统一使用“度”为单位。程序内部会自动转换为弧度。
+
+`贮箱基本参数` 中的 `几何类型` 当前支持：
+
+- `QJ第一类`：使用 `贮箱几何_第一类` 和可选 `贮箱几何_第二类` 中的 QJ 1080A 分段半径模型。
+- `等效圆柱`：只使用 `等效半径R` 和 `等效高度H` 进行圆柱贮箱积分，不依赖 `贮箱几何_第一类`。
+
+`等效圆柱` 适合公开资料不足、只需要做工程近似验证的型号样例，例如 Starship/Super Heavy。
 
 ## 输出表格说明
 
@@ -141,11 +162,14 @@ python -m pytest tests
 
 - 平行轴定理质量特性合成。
 - 圆柱贮箱体积和质心数值积分。
+- 等效圆柱贮箱在不填写 QJ 第一类几何时的积分。
 - 分离时刻不变质量剔除规则。
 
 ## 当前实现范围和注意事项
 
 - 已实现 QJ 1080A 贮箱半径、推进剂积分、增压气体、可变质量、可抛质量和全箭时间序列主流程。
+- 已支持 `QJ第一类` 和 `等效圆柱` 两种贮箱几何类型。
+- `input_starship_example.xlsx` 是基于公开 Starship/Super Heavy 尺寸和质量数据构造的近似验证样例，不代表 SpaceX 官方内部质量特性模型。
 - `运输状态` 表目前作为输入预留，尚未接入结果输出流程。
 - 贮箱几何方程根据 QJ 1080A 公式和图 3/图 4 符号实现。用于真实型号前，建议用 CAD 或已有分析结果校核满箱体积、满箱质心和满箱转动惯量。
 - 生成的 Excel/PDF 结果不提交到 Git；需要时可本地重新运行生成。
