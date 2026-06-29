@@ -1,8 +1,8 @@
 from pathlib import Path
 
 import pandas as pd
-from openpyxl import load_workbook
-from openpyxl.styles import Alignment, Font, PatternFill
+
+from workbook_formatting import format_input_workbook
 
 
 OUT = Path("input_template.xlsx")
@@ -54,22 +54,7 @@ def write_template(path: Path = OUT) -> None:
         for name, df in sheets.items():
             df.to_excel(writer, sheet_name=name, index=False)
 
-    wb = load_workbook(path)
-    for ws in wb.worksheets:
-        ws.freeze_panes = "A2"
-        ws.sheet_view.showGridLines = False
-        for cell in ws[1]:
-            cell.font = Font(name="Arial", bold=True, color="FFFFFF")
-            cell.fill = PatternFill("solid", fgColor="1F4E78")
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        for row in ws.iter_rows(min_row=2):
-            for cell in row:
-                cell.font = Font(name="Arial", size=10, color="0000FF")
-                cell.alignment = Alignment(vertical="center", wrap_text=True)
-        for col in ws.columns:
-            width = min(max(len(str(c.value)) if c.value is not None else 0 for c in col) + 2, 26)
-            ws.column_dimensions[col[0].column_letter].width = width
-    wb.save(path)
+    format_input_workbook(str(path))
 
 
 if __name__ == "__main__":
