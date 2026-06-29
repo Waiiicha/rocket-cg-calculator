@@ -1,0 +1,77 @@
+from pathlib import Path
+
+import pandas as pd
+from openpyxl import load_workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+
+
+OUT = Path("input_template.xlsx")
+
+
+def write_template(path: Path = OUT) -> None:
+    sheets = {
+        "总体参数": pd.DataFrame([
+            ["火箭总级数Nr", 3, "-", "子级数量"],
+            ["助推器数量Nzt", 0, "-", "无助推器填0"],
+            ["飞行开始时间", 0, "s", ""],
+            ["飞行结束时间", 300, "s", ""],
+            ["时间步长", 5, "s", "输出时间序列步长"],
+            ["液位积分点数", 401, "-", "建议正式计算使用1001或更高"],
+        ], columns=["参数", "值", "单位", "说明"]),
+        "级事件": pd.DataFrame([
+            ["子级", 1, 0, 120, 125, "示例"],
+            ["子级", 2, 125, 240, 245, "示例"],
+            ["子级", 3, 245, 300, 300, "示例"],
+        ], columns=["类型", "编号", "点火时间tf", "关机时间tb", "分离时间ts", "备注"]),
+        "不变质量": pd.DataFrame([
+            ["子级", 1, "一级结构", 10000, 35, 0, 0, 5000, 1200000, 1200000, "示例"],
+            ["子级", 2, "二级结构", 3000, 20, 0, 0, 1200, 180000, 180000, "示例"],
+            ["子级", 3, "三级结构", 1000, 10, 0, 0, 400, 30000, 30000, "示例"],
+        ], columns=["类型", "所属编号", "组件名称", "M", "X", "Y", "Z", "Jx", "Jy", "Jz", "备注"]),
+        "可抛质量": pd.DataFrame([
+            ["整流罩", 500, 8, 0, 0, 200, 5000, 5000, 120, "示例"],
+        ], columns=["名称", "M", "X", "Y", "Z", "Jx", "Jy", "Jz", "抛离时间", "备注"]),
+        "贮箱基本参数": pd.DataFrame([
+            ["子级", 1, 1, "一级氧化剂箱", 1140, 5, 50, 6000, 300, 6000, 45, 0, 0, 0, 120, 125, 0, 12, 5.3, 6, 90000, "示例"],
+            ["子级", 1, 2, "一级燃料箱", 810, 4, 35, 3500, 200, 3500, 32, 0, 0, 0, 120, 125, 0, 10, 4.3, 5, 50000, "示例"],
+        ], columns=["类型", "所属编号", "贮箱编号", "名称", "推进剂密度rho_phi", "气体密度rho_g", "秒流量mdot", "加注量Mf", "关机剩余量Mr", "启动后剩余量Mef", "坐标原点X或Loki", "坐标原点Y", "坐标原点Z", "点火时间tf", "关机时间tb", "分离时间ts", "箱底hb", "总高H", "总容积Vo", "满箱Xo", "满箱Jyo", "备注"]),
+        "贮箱几何_第一类": pd.DataFrame([
+            ["子级-1-1", 0.25, 1.5, 0.8, 0.8, 1.5, 0.25, 0.5, 2.0, 3.0, 4.0, 8.0, 9.0, 10.0, 11.5, 12.0, 1.0, 11.0, 1.5, 1.0, 1.0, 35, 35, "示例"],
+            ["子级-1-2", 0.20, 1.2, 0.65, 0.65, 1.2, 0.20, 0.4, 1.7, 2.5, 3.3, 6.7, 7.5, 8.3, 9.6, 10.0, 0.85, 9.15, 1.2, 0.85, 0.85, 35, 35, "示例"],
+        ], columns=["贮箱ID", "R11", "R12", "R13", "R14", "R15", "R16", "H11", "H12", "H13", "H14", "H15", "H16", "H17", "H18", "H19", "h11", "h12", "semi_a11", "b11", "b12", "beta11_deg", "beta12_deg", "备注"]),
+        "贮箱几何_第二类": pd.DataFrame([
+            ["子级-1-1", "否", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "无扣除"],
+            ["子级-1-2", "否", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "无扣除"],
+        ], columns=["贮箱ID", "是否启用扣除", "R21", "R22", "R23", "R24", "R25", "R26", "R27", "H21", "H22", "H23", "H24", "H25", "H26", "H27", "H28", "H29", "h21", "h22", "semi_a22", "b21", "b22", "beta21_deg", "beta22_deg", "备注"]),
+        "外行导管": pd.DataFrame([
+            ["子级-1-1", 1, 0, 0, 0, 0, "无外行导管时可填0或留空"],
+            ["子级-1-2", 1, 0, 0, 0, 0, "无外行导管时可填0或留空"],
+        ], columns=["贮箱ID", "导管编号", "m_phi", "Y_phi", "Z_phi", "Jx_phi", "备注"]),
+        "运输状态": pd.DataFrame(columns=["部段编号", "部段名称", "Xq", "组件名称", "M", "Xcq", "Ycq", "Zcq", "Jxcq", "Jycq", "Jzcq", "备注"]),
+    }
+
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        for name, df in sheets.items():
+            df.to_excel(writer, sheet_name=name, index=False)
+
+    wb = load_workbook(path)
+    for ws in wb.worksheets:
+        ws.freeze_panes = "A2"
+        ws.sheet_view.showGridLines = False
+        for cell in ws[1]:
+            cell.font = Font(name="Arial", bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="1F4E78")
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        for row in ws.iter_rows(min_row=2):
+            for cell in row:
+                cell.font = Font(name="Arial", size=10, color="0000FF")
+                cell.alignment = Alignment(vertical="center", wrap_text=True)
+        for col in ws.columns:
+            width = min(max(len(str(c.value)) if c.value is not None else 0 for c in col) + 2, 26)
+            ws.column_dimensions[col[0].column_letter].width = width
+    wb.save(path)
+
+
+if __name__ == "__main__":
+    write_template()
+    print(f"saved {OUT.resolve()}")
