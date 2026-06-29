@@ -10,10 +10,12 @@ HEADER_FILL = "1F4E78"
 INPUT_FILL = "FFF2CC"
 NOTE_FILL = "F2F2F2"
 INFO_FILL = "D9EAF7"
+OUTPUT_FILL = "E2F0D9"
 WHITE = "FFFFFF"
 BLUE = "0000FF"
 BLACK = "000000"
 GRID = "BFBFBF"
+INPUT_RESERVE_ROWS = 500
 
 
 SHEET_NOTES = {
@@ -102,13 +104,44 @@ def add_instructions_sheet(wb) -> None:
         row[1].alignment = Alignment(vertical="center", wrap_text=True)
 
 
-def apply_grid(ws) -> None:
+WIDTHS = {
+    "参数": 24,
+    "值": 40,
+    "单位": 12,
+    "说明": 56,
+    "备注": 46,
+    "名称": 26,
+    "组件名称": 28,
+    "部段名称": 24,
+    "贮箱ID": 18,
+    "类型": 12,
+    "几何类型": 16,
+    "坐标原点X或Loki": 20,
+    "推进剂密度rho_phi": 20,
+    "气体密度rho_g": 18,
+    "秒流量mdot": 16,
+    "启动后剩余量Mef": 18,
+    "等效半径R": 16,
+    "等效高度H": 16,
+    "总容积Vo": 16,
+    "满箱Xo": 16,
+    "满箱Jyo": 18,
+    "事件类型": 18,
+    "对象": 18,
+    "事件时间": 16,
+    "匹配时间": 16,
+}
+
+
+def apply_grid(ws, max_row: int | None = None, max_col: int | None = None) -> None:
     thin = Side(style="thin", color=GRID)
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    for row in ws.iter_rows():
+    max_row = max_row or ws.max_row
+    max_col = max_col or ws.max_column
+    for row in ws.iter_rows(min_row=1, max_row=max_row, min_col=1, max_col=max_col):
         for cell in row:
             cell.border = border
-            cell.alignment = Alignment(vertical="center", wrap_text=True)
+            cell.alignment = Alignment(vertical="center", wrap_text=False)
 
 
 def add_dropdown(ws, cell_range: str, options: list[str]) -> None:
@@ -173,10 +206,11 @@ def apply_validations(ws) -> None:
 
 
 def format_worksheet(ws) -> None:
+    reserve_rows = max(INPUT_RESERVE_ROWS, ws.max_row)
     ws.freeze_panes = "A2"
     ws.sheet_view.showGridLines = False
-    ws.auto_filter.ref = ws.dimensions
-    apply_grid(ws)
+    ws.auto_filter.ref = f"A1:{ws.cell(1, ws.max_column).column_letter}{reserve_rows}"
+    apply_grid(ws, reserve_rows, ws.max_column)
     if ws.max_row >= 1:
         ws.row_dimensions[1].height = 34
     for cell in ws[1]:
@@ -185,18 +219,19 @@ def format_worksheet(ws) -> None:
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         if cell.value in HEADER_COMMENTS:
             cell.comment = Comment(HEADER_COMMENTS[cell.value], "OpenCode")
-    for row in ws.iter_rows(min_row=2):
+    for row in ws.iter_rows(min_row=2, max_row=reserve_rows, min_col=1, max_col=ws.max_column):
         for cell in row:
             cell.font = Font(name="Arial", size=10, color=BLUE)
             cell.fill = PatternFill("solid", fgColor=INPUT_FILL)
-            cell.alignment = Alignment(vertical="center", wrap_text=True)
-    if ws.max_column >= 1 and ws.max_row >= 2:
-        for cell in ws[ws.max_column]:
-            if cell.row > 1:
-                cell.fill = PatternFill("solid", fgColor=NOTE_FILL)
-                cell.font = Font(name="Arial", size=10, color=BLACK)
+            cell.alignment = Alignment(vertical="center", wrap_text=False)
+    if ws.max_column >= 1:
+        for cell in ws.iter_cols(min_col=ws.max_column, max_col=ws.max_column, min_row=2, max_row=reserve_rows):
+            for c in cell:
+                c.fill = PatternFill("solid", fgColor=NOTE_FILL)
+                c.font = Font(name="Arial", size=10, color=BLACK)
     for col in ws.columns:
-        width = min(max(len(str(c.value)) if c.value is not None else 0 for c in col) + 3, 32)
+        header = str(col[0].value) if col[0].value is not None else ""
+        width = WIDTHS.get(header, max(14, min(max(len(str(c.value)) if c.value is not None else 0 for c in col[: min(len(col), 50)]) + 4, 42)))
         ws.column_dimensions[col[0].column_letter].width = width
     apply_validations(ws)
 
@@ -217,4 +252,37 @@ def format_input_workbook(path: str) -> None:
         if ws.title != "填写说明":
             format_worksheet(ws)
     add_sheet_notes(wb)
+    wb.save(path)
+
+
+def format_output_workbook(path: str) -> None:
+    wb = load_workbook(path)
+    for ws in wb.worksheets:
+        ws.freeze_panes = "A2"
+        ws.sheet_view.showGridLines = False
+        max_row = max(ws.max_row + 20, 100)
+        max_col = ws.max_column
+        ws.auto_filter.ref = f"A1:{ws.cell(1, max_col).column_letter}{ws.max_row}"
+        apply_grid(ws, max_row, max_col)
+        ws.row_dimensions[1].height = 32
+        for cell in ws[1]:
+            cell.font = Font(name="Arial", bold=True, color=WHITE)
+            cell.fill = PatternFill("solid", fgColor=HEADER_FILL)
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        for row in ws.iter_rows(min_row=2, max_row=max_row, min_col=1, max_col=max_col):
+            for cell in row:
+                cell.font = Font(name="Arial", size=10, color=BLACK)
+                cell.fill = PatternFill("solid", fgColor=OUTPUT_FILL)
+                cell.alignment = Alignment(vertical="center", wrap_text=False)
+                header = str(ws.cell(1, cell.column).value)
+                if header in {"M", "M_v", "M_phi", "M_g", "Jx", "Jy", "Jz", "Jx_v", "Jy_v", "Jz_v", "Jx_phi", "Jy_phi", "Jz_phi"}:
+                    cell.number_format = '#,##0.000'
+                elif header in {"X", "Y", "Z", "h", "X_v", "Y_v", "Z_v", "X_phi", "Y_phi", "Z_phi", "X_g"}:
+                    cell.number_format = '0.000'
+                elif header in {"t", "事件时间", "匹配时间", "前一时间", "后一时间"}:
+                    cell.number_format = '0.0'
+        for col in ws.columns:
+            header = str(col[0].value) if col[0].value is not None else ""
+            width = WIDTHS.get(header, max(14, min(max(len(str(c.value)) if c.value is not None else 0 for c in col[: min(len(col), 80)]) + 4, 42)))
+            ws.column_dimensions[col[0].column_letter].width = width
     wb.save(path)

@@ -7,6 +7,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from workbook_formatting import format_output_workbook
+
 
 EPS = 1e-12
 
@@ -347,6 +349,85 @@ def time_series_results(data: dict[str, pd.DataFrame], inv: pd.DataFrame, level:
     return pd.DataFrame(inv_rows), pd.DataFrame(tank_rows), pd.DataFrame(jet_rows), pd.DataFrame(total_rows)
 
 
+def _nearest_row(df: pd.DataFrame, t: float) -> pd.Series:
+    return df.loc[(df["t"] - t).abs().idxmin()]
+
+
+def build_key_time_summary(data: dict[str, pd.DataFrame], total: pd.DataFrame) -> pd.DataFrame:
+    events = [{"事件类型": "飞行开始", "对象": "全箭", "事件时间": float(total["t"].min()), "说明": "时间序列起点"}, {"事件类型": "飞行结束", "对象": "全箭", "事件时间": float(total["t"].max()), "说明": "时间序列终点"}]
+    for _, r in data.get("级事件", pd.DataFrame()).iterrows():
+        obj = f"{_text(r.get('类型'))}{int(_num(r.get('编号')))}"
+        events.extend([
+            {"事件类型": "点火", "对象": obj, "事件时间": _num(r.get("点火时间tf")), "说明": "级事件表"},
+            {"事件类型": "关机", "对象": obj, "事件时间": _num(r.get("关机时间tb")), "说明": "级事件表"},
+            {"事件类型": "分离", "对象": obj, "事件时间": _num(r.get("分离时间ts")), "说明": "t >= ts 后剔除"},
+        ])
+    for _, r in data.get("可抛质量", pd.DataFrame()).iterrows():
+        if "抛离时间" in r and not pd.isna(r.get("抛离时间")):
+            events.append({"事件类型": "可抛质量抛离", "对象": _text(r.get("名称")), "事件时间": _num(r.get("抛离时间")), "说明": "可抛质量表"})
+
+    rows = []
+    for e in events:
+        tr = _nearest_row(total, e["事件时间"])
+        rows.append({**e, "匹配时间": tr["t"], "M": tr["M"], "X": tr["X"], "Y": tr["Y"], "Z": tr["Z"], "Jx": tr["Jx"], "Jy": tr["Jy"], "Jz": tr["Jz"]})
+    return pd.DataFrame(rows).drop_duplicates(subset=["事件类型", "对象", "事件时间"]).sort_values(["事件时间", "事件类型", "对象"]).reset_index(drop=True)
+
+
+def build_event_delta_summary(data: dict[str, pd.DataFrame], total: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for _, r in data.get("级事件", pd.DataFrame()).iterrows():
+        obj = f"{_text(r.get('类型'))}{int(_num(r.get('编号')))}"
+        for event_name, col in [("点火", "点火时间tf"), ("关机", "关机时间tb"), ("分离", "分离时间ts")]:
+            t = _num(r.get(col))
+            before = total[total["t"] < t]
+            after = total[total["t"] >= t]
+            if before.empty or after.empty:
+                continue
+            b = before.iloc[-1]
+            a = after.iloc[0]
+            rows.append({
+                "事件类型": event_name,
+                "对象": obj,
+                "事件时间": t,
+                "前一时间": b["t"],
+                "后一时间": a["t"],
+                "ΔM": a["M"] - b["M"],
+                "ΔX": a["X"] - b["X"],
+                "ΔY": a["Y"] - b["Y"],
+                "ΔZ": a["Z"] - b["Z"],
+                "ΔJx": a["Jx"] - b["Jx"],
+                "ΔJy": a["Jy"] - b["Jy"],
+                "ΔJz": a["Jz"] - b["Jz"],
+            })
+    return pd.DataFrame(rows)
+
+
+def build_result_overview(data: dict[str, pd.DataFrame], results: dict[str, pd.DataFrame], input_path: str | Path) -> pd.DataFrame:
+    total = results["全箭时间序列"]
+    initial = total.iloc[0]
+    final = total.iloc[-1]
+    nonzero = total[total["M"] > EPS]
+    rows = [
+        ["输入文件", str(input_path), ""],
+        ["时间范围", f"{total['t'].min()} ~ {total['t'].max()}", "s"],
+        ["时间点数量", len(total), ""],
+        ["贮箱数量", len(data.get("贮箱基本参数", pd.DataFrame())), ""],
+        ["级事件数量", len(data.get("级事件", pd.DataFrame())), ""],
+        ["初始全箭质量", initial["M"], "kg"],
+        ["初始质心X", initial["X"], "m"],
+        ["初始质心Y", initial["Y"], "m"],
+        ["初始质心Z", initial["Z"], "m"],
+        ["初始Jx", initial["Jx"], "kg·m^2"],
+        ["初始Jy", initial["Jy"], "kg·m^2"],
+        ["初始Jz", initial["Jz"], "kg·m^2"],
+        ["最大质量", total["M"].max(), "kg"],
+        ["最小非零质量", nonzero["M"].min() if not nonzero.empty else 0, "kg"],
+        ["最终质量", final["M"], "kg"],
+        ["输入检查", _text(results["输入检查"].iloc[0].get("级别")) if not results["输入检查"].empty else "", ""],
+    ]
+    return pd.DataFrame(rows, columns=["项目", "值", "单位"])
+
+
 def calculate(input_path: str | Path) -> dict[str, pd.DataFrame]:
     data = read_input_excel(input_path)
     checks = validate_inputs(data)
@@ -355,7 +436,7 @@ def calculate(input_path: str | Path) -> dict[str, pd.DataFrame]:
     inv = invariant_results(data)
     level = build_tank_level_results(data, n)
     invariant_ts, variable_ts, jet_ts, total_ts = time_series_results(data, inv, level)
-    return {
+    results = {
         "输入检查": checks,
         "不变质量结果": inv,
         "贮箱液位结果": level,
@@ -364,6 +445,10 @@ def calculate(input_path: str | Path) -> dict[str, pd.DataFrame]:
         "可抛质量时间序列": jet_ts,
         "全箭时间序列": total_ts,
     }
+    key_summary = build_key_time_summary(data, total_ts)
+    delta_summary = build_event_delta_summary(data, total_ts)
+    overview = build_result_overview(data, results, input_path)
+    return {"结果总览": overview, "关键时间点汇总": key_summary, "关键事件前后对比": delta_summary, **results}
 
 
 def write_output(results: dict[str, pd.DataFrame], output_path: str | Path) -> None:
@@ -372,15 +457,7 @@ def write_output(results: dict[str, pd.DataFrame], output_path: str | Path) -> N
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         for name, df in results.items():
             df.to_excel(writer, sheet_name=name[:31], index=False)
-        wb = writer.book
-        for ws in wb.worksheets:
-            ws.freeze_panes = "A2"
-            ws.sheet_view.showGridLines = False
-            for cell in ws[1]:
-                cell.font = cell.font.copy(bold=True)
-            for col in ws.columns:
-                width = min(max(len(str(c.value)) if c.value is not None else 0 for c in col) + 2, 28)
-                ws.column_dimensions[col[0].column_letter].width = width
+    format_output_workbook(str(output_path))
 
 
 def write_plots(results: dict[str, pd.DataFrame], output_path: str | Path) -> None:
