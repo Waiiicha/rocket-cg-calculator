@@ -48,6 +48,10 @@ def _text(value: Any) -> str:
     return str(value).strip()
 
 
+def _has_value(value: Any) -> bool:
+    return not (value is None or (isinstance(value, float) and np.isnan(value)) or value == "")
+
+
 def combine_mass_properties(items: list[MassProperties]) -> MassProperties:
     items = [i for i in items if i.mass > EPS]
     total = sum(i.mass for i in items)
@@ -271,7 +275,7 @@ def invariant_mp_at_time(t: float, inv: pd.DataFrame, events: pd.DataFrame) -> M
             keep = True
         else:
             ts = _num(event.iloc[0].get("分离时间ts"), float("inf"))
-            keep = t < ts
+            keep = t <= ts
         if keep:
             items.append(mp_from_row({"M": r["M"], "X": r["X"], "Y": r["Y"], "Z": r["Z"], "Jx": r["Jx"], "Jy": r["Jy"], "Jz": r["Jz"]}))
     return combine_mass_properties(items)
@@ -297,29 +301,101 @@ def build_tank_level_results(data: dict[str, pd.DataFrame], n: int) -> pd.DataFr
     return pd.concat(all_rows, ignore_index=True) if all_rows else pd.DataFrame()
 
 
+def build_tank_bottom_level_results(data: dict[str, pd.DataFrame], level: pd.DataFrame) -> pd.DataFrame:
+    tanks = data.get("贮箱基本参数", pd.DataFrame()).copy()
+    if tanks.empty or level.empty:
+        return pd.DataFrame()
+    rows = []
+    for _, tank in tanks.iterrows():
+        tid = tank_id(tank)
+        sub = level[level["贮箱ID"] == tid].sort_values("h").reset_index(drop=True)
+        if sub.empty:
+            continue
+        hb = _num(tank.get("箱底hb"))
+        mdot = _num(tank.get("秒流量mdot"))
+        mef = _num(tank.get("启动后剩余量Mef"), _num(tank.get("加注量Mf")))
+        base = _nearest_by_column(sub, "h", hb)
+        base_v = _num(base.get("V_phi"))
+        base_m = _num(base.get("M_phi"))
+        base_x = _num(base.get("X_phi"))
+        base_jy = _num(base.get("Jy_phi"))
+        for _, r in sub.iterrows():
+            h = _num(r.get("h"))
+            if h < hb - EPS:
+                continue
+            v_b = max(_num(r.get("V_phi")) - base_v, 0.0)
+            m_b = max(_num(r.get("M_phi")) - base_m, 0.0)
+            x_phi = _num(r.get("X_phi"))
+            x_b = (_num(r.get("M_phi")) * x_phi - base_m * base_x) / m_b - hb if m_b > EPS else 0.0
+            jy_b = _num(r.get("Jy_phi")) - base_jy - base_m * (x_phi - base_x) ** 2 - m_b * (x_phi - x_b - hb) ** 2
+            t_b = (mef - m_b - base_m) / mdot if mdot > EPS else 0.0
+            rows.append({
+                "贮箱ID": tid,
+                "h": h,
+                "hb": hb,
+                "h_b": h - hb,
+                "V_b": v_b,
+                "M_b": m_b,
+                "X_b": x_b,
+                "Jy_b": max(jy_b, 0.0),
+                "Jz_b": max(jy_b, 0.0),
+                "T_b": t_b,
+            })
+    return pd.DataFrame(rows)
+
+
+def _nearest_by_column(df: pd.DataFrame, column: str, value: float) -> pd.Series:
+    return df.loc[(df[column] - value).abs().idxmin()]
+
+
+def _mp_from_level_row(row: pd.Series, mass: float | None = None, x: float | None = None, jy: float | None = None) -> MassProperties:
+    m = _num(row.get("M_v")) if mass is None else mass
+    xx = _num(row.get("X_v")) if x is None else x
+    yy = _num(row.get("Y_v"))
+    zz = _num(row.get("Z_v"))
+    jx = _num(row.get("Jx_v"))
+    jyy = _num(row.get("Jy_v")) if jy is None else jy
+    return MassProperties(m, xx, yy, zz, jx, jyy, jyy)
+
+
 def tank_mp_at_time(t: float, tank: pd.Series, level: pd.DataFrame) -> MassProperties:
     tf, tb, ts = _num(tank.get("点火时间tf")), _num(tank.get("关机时间tb")), _num(tank.get("分离时间ts"))
-    if t >= ts:
+    if t > ts:
         return MassProperties()
     mdot = _num(tank.get("秒流量mdot"))
     mf = _num(tank.get("加注量Mf"))
     mr = _num(tank.get("关机剩余量Mr"))
-    if t < tf:
-        target_m = mf
-    elif t <= tb:
-        target_m = max(mr, mf - mdot * (t - tf))
-    else:
-        target_m = mr
     if level.empty:
         return MassProperties()
-    idx = (level["M_v"] - target_m).abs().idxmin()
-    r = level.loc[idx]
+    mef = _num(tank.get("启动后剩余量Mef"), mf)
+    if t < tf:
+        target_m = mf
+        r = _nearest_by_column(level, "M_v", target_m)
+        local_mp = _mp_from_level_row(
+            r,
+            mass=target_m,
+            x=_num(tank.get("加注后Xf")) if _has_value(tank.get("加注后Xf")) else None,
+            jy=_num(tank.get("加注后Jyf")) if _has_value(tank.get("加注后Jyf")) else None,
+        )
+    elif t <= tb:
+        target_m = max(mr, mef - mdot * (t - tf))
+        r = _nearest_by_column(level, "M_v", target_m)
+        local_mp = _mp_from_level_row(r, mass=target_m)
+    else:
+        target_m = mr
+        r = _nearest_by_column(level, "M_v", target_m)
+        local_mp = _mp_from_level_row(
+            r,
+            mass=target_m,
+            x=_num(tank.get("关机后Xr")) if _has_value(tank.get("关机后Xr")) else None,
+            jy=_num(tank.get("关机后Jyr")) if _has_value(tank.get("关机后Jyr")) else None,
+        )
     is_booster = _text(tank.get("类型")) == "助推器"
     x0 = abs(_num(tank.get("坐标原点X或Loki")))
-    x = x0 - _num(r.get("X_v"))
-    y = _num(tank.get("坐标原点Y")) + _num(r.get("Y_v")) if is_booster else _num(r.get("Y_v"))
-    z = _num(tank.get("坐标原点Z")) + _num(r.get("Z_v")) if is_booster else _num(r.get("Z_v"))
-    return MassProperties(_num(r.get("M_v")), x, y, z, _num(r.get("Jx_v")), _num(r.get("Jy_v")), _num(r.get("Jz_v")))
+    x = x0 - local_mp.x
+    y = _num(tank.get("坐标原点Y")) + local_mp.y if is_booster else local_mp.y
+    z = _num(tank.get("坐标原点Z")) + local_mp.z if is_booster else local_mp.z
+    return MassProperties(local_mp.mass, x, y, z, local_mp.jx, local_mp.jy, local_mp.jz)
 
 
 def time_series_results(data: dict[str, pd.DataFrame], inv: pd.DataFrame, level: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -360,7 +436,7 @@ def build_key_time_summary(data: dict[str, pd.DataFrame], total: pd.DataFrame) -
         events.extend([
             {"事件类型": "点火", "对象": obj, "事件时间": _num(r.get("点火时间tf")), "说明": "级事件表"},
             {"事件类型": "关机", "对象": obj, "事件时间": _num(r.get("关机时间tb")), "说明": "级事件表"},
-            {"事件类型": "分离", "对象": obj, "事件时间": _num(r.get("分离时间ts")), "说明": "t >= ts 后剔除"},
+            {"事件类型": "分离", "对象": obj, "事件时间": _num(r.get("分离时间ts")), "说明": "t > ts 后剔除"},
         ])
     for _, r in data.get("可抛质量", pd.DataFrame()).iterrows():
         if "抛离时间" in r and not pd.isna(r.get("抛离时间")):
@@ -402,6 +478,69 @@ def build_event_delta_summary(data: dict[str, pd.DataFrame], total: pd.DataFrame
     return pd.DataFrame(rows)
 
 
+def transport_results(data: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    df = data.get("运输状态", pd.DataFrame())
+    if df.empty:
+        return pd.DataFrame()
+    rows = []
+    for section_id, g in df.groupby("部段编号", dropna=True):
+        items = []
+        for _, r in g.iterrows():
+            items.append(MassProperties(
+                _num(r.get("M")),
+                _num(r.get("Xcq")),
+                _num(r.get("Ycq")),
+                _num(r.get("Zcq")),
+                _num(r.get("Jxcq")),
+                _num(r.get("Jycq")),
+                _num(r.get("Jzcq")),
+            ))
+        mp = combine_mass_properties(items)
+        first = g.iloc[0]
+        rows.append({
+            "部段编号": int(_num(section_id)),
+            "部段名称": _text(first.get("部段名称")),
+            "Xq": _num(first.get("Xq")),
+            "M_cq": mp.mass,
+            "X_cq": mp.x,
+            "Y_cq": mp.y,
+            "Z_cq": mp.z,
+            "Jx_cq": mp.jx,
+            "Jy_cq": mp.jy,
+            "Jz_cq": mp.jz,
+        })
+    return pd.DataFrame(rows)
+
+
+def validate_computed_inputs(data: dict[str, pd.DataFrame], level: pd.DataFrame) -> pd.DataFrame:
+    warnings = []
+    tanks = data.get("贮箱基本参数", pd.DataFrame())
+    if tanks.empty:
+        return pd.DataFrame()
+    for _, tank in tanks.iterrows():
+        tid = tank_id(tank)
+        mf = _num(tank.get("加注量Mf"))
+        mef = _num(tank.get("启动后剩余量Mef"), mf)
+        mr = _num(tank.get("关机剩余量Mr"))
+        if mef > mf + EPS:
+            warnings.append({"级别": "警告", "位置": f"贮箱基本参数 {tid}", "说明": "启动后剩余量Mef 不应大于 加注量Mf"})
+        if mr > mef + EPS:
+            warnings.append({"级别": "警告", "位置": f"贮箱基本参数 {tid}", "说明": "关机剩余量Mr 不应大于 启动后剩余量Mef"})
+        sub = level[level["贮箱ID"] == tid] if not level.empty and "贮箱ID" in level else pd.DataFrame()
+        if sub.empty:
+            continue
+        min_m, max_m = float(sub["M_v"].min()), float(sub["M_v"].max())
+        for name, value in [("加注量Mf", mf), ("启动后剩余量Mef", mef), ("关机剩余量Mr", mr)]:
+            if value < min_m - EPS or value > max_m + EPS:
+                warnings.append({"级别": "警告", "位置": f"贮箱基本参数 {tid} {name}", "说明": f"质量 {value} 超出液位表 M_v 范围 {min_m} ~ {max_m}，将使用最近液位的质心/惯量"})
+        if _has_value(tank.get("总容积Vo")):
+            vo = _num(tank.get("总容积Vo"))
+            vmax = float(sub["V_phi"].max())
+            if vmax > EPS and abs(vo - vmax) / vmax > 0.01:
+                warnings.append({"级别": "警告", "位置": f"贮箱基本参数 {tid} 总容积Vo", "说明": f"Vo 与几何积分最大体积偏差超过 1%：Vo={vo}, V_phi_max={vmax}"})
+    return pd.DataFrame(warnings)
+
+
 def build_result_overview(data: dict[str, pd.DataFrame], results: dict[str, pd.DataFrame], input_path: str | Path) -> pd.DataFrame:
     total = results["全箭时间序列"]
     initial = total.iloc[0]
@@ -435,11 +574,18 @@ def calculate(input_path: str | Path) -> dict[str, pd.DataFrame]:
     n = int(_num(params.get("液位积分点数"), 1001))
     inv = invariant_results(data)
     level = build_tank_level_results(data, n)
+    computed_checks = validate_computed_inputs(data, level)
+    if not computed_checks.empty:
+        checks = pd.concat([checks, computed_checks], ignore_index=True)
+    bottom_level = build_tank_bottom_level_results(data, level)
+    transport = transport_results(data)
     invariant_ts, variable_ts, jet_ts, total_ts = time_series_results(data, inv, level)
     results = {
         "输入检查": checks,
         "不变质量结果": inv,
         "贮箱液位结果": level,
+        "贮箱箱底液位结果": bottom_level,
+        "运输状态结果": transport,
         "不变质量时间序列": invariant_ts,
         "可变质量时间序列": variable_ts,
         "可抛质量时间序列": jet_ts,
